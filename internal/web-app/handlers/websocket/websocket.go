@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -49,7 +50,11 @@ func New(log *slog.Logger, clients *map[*websocket.Conn]struct{}, mu *sync.RWMut
 				log.Error("Failed to get posts", slog.Any("error", err))
 			} else {
 				for i := len(posts) - 1; i >= 0; i-- {
-					if err := conn.WriteMessage(websocket.TextMessage, []byte(posts[i].Content)); err != nil {
+					data, err := json.Marshal(posts[i])
+					if err != nil {
+						continue
+					}
+					if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 						log.Error("Write error sending history:", slog.Any("error", err))
 						break
 					}
@@ -65,14 +70,21 @@ func New(log *slog.Logger, clients *map[*websocket.Conn]struct{}, mu *sync.RWMut
 			}
 			log.Info("Received message:", slog.String("message", string(message)))
 
+			post := &models.Post{
+				Content:   string(message),
+				CreatedAt: time.Now(),
+			}
+
 			if s != nil {
-				post := &models.Post{
-					Content:   string(message),
-					CreatedAt: time.Now(),
-				}
 				if err := s.SavePost(context.Background(), post); err != nil {
 					log.Error("Failed to save post", slog.Any("error", err))
 				}
+			}
+
+			postData, err := json.Marshal(post)
+			if err != nil {
+				log.Error("Marshal error", slog.Any("error", err))
+				continue
 			}
 
 			mu.RLock()
@@ -86,7 +98,7 @@ func New(log *slog.Logger, clients *map[*websocket.Conn]struct{}, mu *sync.RWMut
 			mu.RUnlock()
 
 			for _, client := range targets {
-				if err := client.WriteMessage(messageType, message); err != nil {
+				if err := client.WriteMessage(messageType, postData); err != nil {
 					log.Error("Write error:", slog.Any("error", err))
 				}
 			}

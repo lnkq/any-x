@@ -271,18 +271,34 @@
                 }
             }
 
-            function createMessageElement(text) {
+            function createMessageElement(data) {
                 const card = document.createElement('div');
                 card.className = 'message-card';
                 
                 const content = document.createElement('div');
                 content.className = 'message-content';
-                content.textContent = text;
+                content.textContent = data.content;
                 
                 const meta = document.createElement('div');
                 meta.className = 'message-meta';
-                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                meta.innerHTML = `<span>Anonymous</span><span>${time}</span>`;
+                const date = new Date(data.created_at);
+
+                function formatTimestamp(d) {
+                    const now = new Date();
+                    const startOfDay = dt => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+                    const msPerDay = 24 * 60 * 60 * 1000;
+                    const diffDays = Math.floor((startOfDay(now) - startOfDay(d)) / msPerDay);
+
+                    if (diffDays === 0) {
+                        const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        return `Today, ${time}`;
+                    }
+
+                    return `${diffDays}d ago`;
+                }
+
+                const timeStr = formatTimestamp(date);
+                meta.innerHTML = `<span>Anonymous</span><span>${timeStr}</span>`;
 
                 card.appendChild(content);
                 card.appendChild(meta);
@@ -290,9 +306,8 @@
                 return card;
             }
 
-            function appendMessage(text) {
-                const msgEl = createMessageElement(text);
-                // Insert at the top (Twitter style)
+            function appendMessage(data) {
+                const msgEl = createMessageElement(data);
                 messagesContainer.insertBefore(msgEl, messagesContainer.firstChild);
             }
 
@@ -315,7 +330,12 @@
                     };
 
                     ws.onmessage = function(evt) {
-                        appendMessage(evt.data);
+                        try {
+                            const data = JSON.parse(evt.data);
+                            appendMessage(data);
+                        } catch (e) {
+                            console.error(e);
+                        }
                     };
 
                     ws.onerror = function(err) {
@@ -335,7 +355,10 @@
                 
                 if(ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(text);
-                    appendMessage(text);
+                    appendMessage({
+                        content: text,
+                        created_at: new Date().toISOString()
+                    });
                     input.value = '';
                     input.focus();
                 } else {
