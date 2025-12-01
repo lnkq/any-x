@@ -1,9 +1,13 @@
 package websocket
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
+
+	"any-x/internal/models"
 
 	"github.com/gorilla/websocket"
 )
@@ -13,7 +17,13 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-func New(log *slog.Logger, clients *map[*websocket.Conn]struct{}, mu *sync.RWMutex) http.HandlerFunc {
+type Storage interface {
+	SavePost(ctx context.Context, post *models.Post) error
+	GetPosts(ctx context.Context, limit int) ([]models.Post, error)
+	Close() error
+}
+
+func New(log *slog.Logger, clients *map[*websocket.Conn]struct{}, mu *sync.RWMutex, s Storage) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -33,6 +43,20 @@ func New(log *slog.Logger, clients *map[*websocket.Conn]struct{}, mu *sync.RWMut
 
 		log.Info("New client connected")
 
+		if s != nil {
+			posts, err := s.GetPosts(context.Background(), 50)
+			if err != nil {
+				log.Error("Failed to get posts", slog.Any("error", err))
+			} else {
+				for i := len(posts) - 1; i >= 0; i-- {
+					if err := conn.WriteMessage(websocket.TextMessage, []byte(posts[i].Content)); err != nil {
+						log.Error("Write error sending history:", slog.Any("error", err))
+						break
+					}
+				}
+			}
+		}
+
 		for {
 			messageType, message, err := conn.ReadMessage()
 			if err != nil {
@@ -40,6 +64,16 @@ func New(log *slog.Logger, clients *map[*websocket.Conn]struct{}, mu *sync.RWMut
 				break
 			}
 			log.Info("Received message:", slog.String("message", string(message)))
+
+			if s != nil {
+				post := &models.Post{
+					Content:   string(message),
+					CreatedAt: time.Now(),
+				}
+				if err := s.SavePost(context.Background(), post); err != nil {
+					log.Error("Failed to save post", slog.Any("error", err))
+				}
+			}
 
 			mu.RLock()
 			targets := make([]*websocket.Conn, 0, len(*clients))
