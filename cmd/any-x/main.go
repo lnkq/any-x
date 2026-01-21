@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	cfg := config.DefaultLocal()
+	cfg := config.MustLoad()
 
 	application := app.New(cfg)
 
